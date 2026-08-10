@@ -2586,6 +2586,11 @@ void ide_bus_reset(IDEBus *bus)
     if (bus->dma->ops->reset) {
         bus->dma->ops->reset(bus->dma);
     }
+    
+    // 新增：如果系統發生重置，立刻取消正在倒數的中斷，防止幽靈中斷炸毀系統！
+    if (bus->irq_timer) {
+        timer_del(bus->irq_timer);
+    }
 }
 
 static bool ide_cd_is_tray_open(void *opaque)
@@ -2824,6 +2829,14 @@ static IDEDMA ide_dma_nop = {
     .aiocb = NULL,
 };
 
+static void ide_bus_irq_callback(void *opaque)
+{
+    IDEBus *bus = opaque;
+    if (!(bus->cmd & IDE_CTRL_DISABLE_IRQ)) {
+        qemu_irq_raise(bus->irq);
+    }
+}
+
 void ide_bus_init_output_irq(IDEBus *bus, qemu_irq irq_out)
 {
     int i;
@@ -2834,12 +2847,42 @@ void ide_bus_init_output_irq(IDEBus *bus, qemu_irq irq_out)
     }
     bus->irq = irq_out;
     bus->dma = &ide_dma_nop;
+    
+    bus->irq_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ide_bus_irq_callback, bus);
 }
 
 void ide_bus_set_irq(IDEBus *bus)
 {
-    if (!(bus->cmd & IDE_CTRL_DISABLE_IRQ)) {
+    /*if (!(bus->cmd & IDE_CTRL_DISABLE_IRQ)) {
         qemu_irq_raise(bus->irq);
+    }*/
+    
+    // 終極解法：為所有硬碟操作加入 2 毫秒 (2,000,000 奈秒) 的非同步延遲。
+    // 這足以讓 Xbox 遊戲引擎有充足的時間準備記憶體指標，避開當機！
+    // 且因為是 QEMUTimer，絕對不會造成音效爆音！
+    //timer_mod(bus->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 2000000);
+    
+    /*if (!(bus->cmd & IDE_CTRL_DISABLE_IRQ)) {
+        timer_mod(bus->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 8000000);
+    }*/
+    
+    // 如果計時器已經在倒數，代表模擬器正在「連續密集」地發送中斷 (例如 PIO 傳輸)
+    if (timer_pending(bus->irq_timer)) {
+        
+        // 1. 【關鍵修復】必須先刪除原本的計時器！這樣 16ms 後才不會有幽靈中斷炸毀系統。
+        timer_del(bus->irq_timer);
+        
+        // 2. 立刻發射中斷！確保連續指令的順序 100% 準確，且不會 Timeout 卡死。
+        if (!(bus->cmd & IDE_CTRL_DISABLE_IRQ)) {
+            qemu_irq_raise(bus->irq);
+        }
+        
+    } else {
+        
+        // 如果計時器沒在跑，代表這是一次「獨立的單次傳輸」 (例如容易當機的 DMA 遊戲載入)
+        // 給予 16ms 的緩衝，讓遊戲引擎有時間設定指標，避開 0xc0000005 當機！
+        timer_mod(bus->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 16000000);
+        
     }
 }
 
