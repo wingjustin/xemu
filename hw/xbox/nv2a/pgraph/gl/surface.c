@@ -25,6 +25,7 @@
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "debug.h"
 #include "renderer.h"
+#include "qemu/main-loop.h"
 
 static void surface_download(NV2AState *d, SurfaceBinding *surface, bool force);
 static void surface_download_to_buffer(NV2AState *d, SurfaceBinding *surface,
@@ -462,7 +463,15 @@ static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
         qatomic_set(&r->downloads_pending, true);
         pfifo_kick(d);
         qemu_mutex_unlock(&d->pfifo.lock);
+        
+        bool drop_bql = bql_locked();
+        if (drop_bql) {
+            bql_unlock();
+        }
         qemu_event_wait(&r->downloads_complete);
+        if (drop_bql) {
+            bql_lock();
+        }
     }
 }
 
