@@ -2869,7 +2869,7 @@ void ide_bus_set_irq(IDEBus *bus)
     // 如果計時器已經在倒數，代表模擬器正在「連續密集」地發送中斷 (例如 PIO 傳輸)
     if (timer_pending(bus->irq_timer)) {
         
-        // 1. 【關鍵修復】必須先刪除原本的計時器！這樣 16ms 後才不會有幽靈中斷炸毀系統。
+        // 1. 【關鍵修復】必須先刪除原本的計時器！這樣 8ms 後才不會有幽靈中斷炸毀系統。
         timer_del(bus->irq_timer);
         
         // 2. 立刻發射中斷！確保連續指令的順序 100% 準確，且不會 Timeout 卡死。
@@ -2880,8 +2880,8 @@ void ide_bus_set_irq(IDEBus *bus)
     } else {
         
         // 如果計時器沒在跑，代表這是一次「獨立的單次傳輸」 (例如容易當機的 DMA 遊戲載入)
-        // 給予 16ms 的緩衝，讓遊戲引擎有時間設定指標，避開 0xc0000005 當機！
-        timer_mod(bus->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 16000000);
+        // 給予 8ms 的緩衝，讓遊戲引擎有時間設定指標，避開 0xc0000005 當機！
+        timer_mod(bus->irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + 8000000);
         
     }
 }
