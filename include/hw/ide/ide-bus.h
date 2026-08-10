@@ -4,6 +4,7 @@
 #include "system/ioport.h"
 #include "hw/ide/ide-dev.h"
 #include "hw/ide/ide-dma.h"
+#include "qemu/timer.h"
 
 struct IDEBus {
     BusState qbus;
@@ -26,6 +27,8 @@ struct IDEBus {
     PortioList portio_list;
     PortioList portio2_list;
     VMChangeStateEntry *vmstate;
+    
+    QEMUTimer *irq_timer; /*timer for irq_raise*/
 };
 
 #define TYPE_IDE_BUS "IDE"
