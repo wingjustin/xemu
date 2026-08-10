@@ -26,6 +26,7 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "qemu/compiler.h"
+#include "qemu/main-loop.h"
 #include "ui/xemu-settings.h"
 #include "renderer.h"
 
@@ -252,7 +253,7 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        surface->image_scratch,
                        surface->image_scratch_current_layout, 1, &blit_region,
-                       VK_FILTER_NEAREST);
+                       surface->color ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
 
         pgraph_vk_transition_image_layout(pg, cmd, surface->image_scratch,
                                           surface->host_fmt.vk_format,
@@ -575,7 +576,14 @@ static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
         qatomic_set(&r->downloads_pending, true);
         pfifo_kick(d);
         qemu_mutex_unlock(&d->pfifo.lock);
+        bool drop_bql = bql_locked();
+        if (drop_bql) {
+            bql_unlock();
+        }
         qemu_event_wait(&r->downloads_complete);
+        if (drop_bql) {
+            bql_lock();
+        }
     }
 }
 
@@ -1236,7 +1244,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
         vkCmdBlitImage(cmd, surface->image_scratch,
                        surface->image_scratch_current_layout, surface->image,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blitRegion,
-                       VK_FILTER_NEAREST);
+                       surface->color ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     } else {
         // Note: We should be able to vkCmdCopyBufferToImage directly into
         // surface->image, but there is an apparent AMD Windows driver
