@@ -26,6 +26,7 @@
 #include "hw/xbox/nv2a/nv2a_int.h"
 #include "hw/xbox/nv2a/pgraph/swizzle.h"
 #include "qemu/compiler.h"
+#include "qemu/main-loop.h"
 #include "ui/xemu-settings.h"
 #include "renderer.h"
 
