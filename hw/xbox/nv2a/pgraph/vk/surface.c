@@ -252,7 +252,7 @@ static void download_surface_to_buffer(NV2AState *d, SurfaceBinding *surface,
                        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        surface->image_scratch,
                        surface->image_scratch_current_layout, 1, &blit_region,
-                       VK_FILTER_NEAREST);
+                       surface->color ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
 
         pgraph_vk_transition_image_layout(pg, cmd, surface->image_scratch,
                                           surface->host_fmt.vk_format,
@@ -534,6 +534,26 @@ void pgraph_vk_download_dirty_surfaces(NV2AState *d)
     qemu_event_set(&r->dirty_surfaces_download_complete);
 }
 
+static void wait_for_surface_downloads(NV2AState *d)
+{
+    bool is_main_thread = qemu_in_main_thread();
+    if (is_main_thread) {
+        bql_unlock();
+    }
+
+    PGRAPHVkState *r = d->pgraph.vk_renderer_state;
+    qemu_mutex_lock(&d->pfifo.lock);
+    qemu_event_reset(&r->downloads_complete);
+    qatomic_set(&r->downloads_pending, true);
+    pfifo_kick(d);
+    qemu_mutex_unlock(&d->pfifo.lock);
+    qemu_event_wait(&r->downloads_complete);
+
+    if (is_main_thread) {
+        bql_lock();
+    }
+}
+
 static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
                                     hwaddr len, bool write)
 {
@@ -570,12 +590,7 @@ static void surface_access_callback(void *opaque, MemoryRegion *mr, hwaddr addr,
     qemu_mutex_unlock(&d->pgraph.lock);
 
     if (wait_for_downloads) {
-        qemu_mutex_lock(&d->pfifo.lock);
-        qemu_event_reset(&r->downloads_complete);
-        qatomic_set(&r->downloads_pending, true);
-        pfifo_kick(d);
-        qemu_mutex_unlock(&d->pfifo.lock);
-        qemu_event_wait(&r->downloads_complete);
+        wait_for_surface_downloads(d);
     }
 }
 
@@ -1236,7 +1251,7 @@ void pgraph_vk_upload_surface_data(NV2AState *d, SurfaceBinding *surface,
         vkCmdBlitImage(cmd, surface->image_scratch,
                        surface->image_scratch_current_layout, surface->image,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blitRegion,
-                       VK_FILTER_NEAREST);
+                       surface->color ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
     } else {
         // Note: We should be able to vkCmdCopyBufferToImage directly into
         // surface->image, but there is an apparent AMD Windows driver
