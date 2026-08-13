@@ -1412,6 +1412,10 @@ static void ide_reset(IDEState *s)
     s->end_transfer_func = ide_dummy_transfer_stop;
     ide_dummy_transfer_stop(s);
     s->media_changed = 0;
+	
+	if (s->ide_bus_set_irq_timer) {
+        timer_del(s->ide_bus_set_irq_timer);
+    }
 }
 
 static bool cmd_nop(IDEState *s, uint8_t cmd)
@@ -2698,6 +2702,12 @@ int ide_init_drive(IDEState *s, IDEDevice *dev, IDEDriveKind kind, Error **errp)
     return 0;
 }
 
+static void ide_bus_set_irq_callback(void *opaque)
+{
+    IDEState *s = opaque;
+	ide_bus_set_irq(s->bus);
+}
+
 static void ide_init1(IDEBus *bus, int unit)
 {
     static int drive_serial = 1;
@@ -2716,6 +2726,10 @@ static void ide_init1(IDEBus *bus, int unit)
 
     s->sector_write_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
                                            ide_sector_write_timer_cb, s);
+										   
+    // 【新增】為每個 IDE 設備初始化專屬的 ATAPI 延遲計時器
+    s->ide_bus_set_irq_timer_delay_ns = 0;
+    s->ide_bus_set_irq_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, ide_bus_set_irq_callback, s);
 }
 
 static int ide_nop_int(const IDEDMA *dma, bool is_write)
@@ -2845,9 +2859,15 @@ void ide_bus_set_irq(IDEBus *bus)
 
 void ide_exit(IDEState *s)
 {
-    timer_free(s->sector_write_timer);
+	timer_free(s->sector_write_timer);
     qemu_vfree(s->smart_selftest_data);
     qemu_vfree(s->io_buffer);
+	
+	if(s->ide_bus_set_irq_timer){
+	    timer_del(s->ide_bus_set_irq_timer);
+        timer_free(s->ide_bus_set_irq_timer);
+	    s->ide_bus_set_irq_timer = NULL;
+	}
 }
 
 static bool is_identify_set(void *opaque, int version_id)
