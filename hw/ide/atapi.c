@@ -385,7 +385,26 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
     if (s->packet_transfer_size <= 0) {
         s->status = READY_STAT | SEEK_STAT;
         s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO | ATAPI_INT_REASON_CD;
-        ide_bus_set_irq(s->bus);
+        //ide_bus_set_irq(s->bus);
+		if(s->ide_bus_set_irq_timer_delay_ns > 0){
+		// 如果計時器已經在倒數，代表模擬器正在「連續密集」地發送中斷 (例如 PIO 傳輸)
+            if (timer_pending(s->ide_bus_set_irq_timer)) {
+                
+                // 1. 【關鍵修復】必須先刪除原本的計時器！這樣 6ms 後才不會有幽靈中斷炸毀系統。
+                timer_del(s->ide_bus_set_irq_timer);
+                
+                // 2. 立刻發射中斷！確保連續指令的順序 100% 準確，且不會 Timeout 卡死。
+		    	ide_bus_set_irq(s->bus);
+                
+            } else {
+                
+                // 如果計時器沒在跑，代表這是一次「獨立的單次傳輸」 (例如容易當機的 DMA 遊戲載入)
+                // 給予 6ms 的緩衝，讓遊戲引擎有時間設定指標，避開 0xc0000005 當機！
+                timer_mod(s->ide_bus_set_irq_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + s->ide_bus_set_irq_timer_delay_ns);
+            }
+		} else{
+			ide_bus_set_irq(s->bus);
+		}
         goto eot;
     }
 
