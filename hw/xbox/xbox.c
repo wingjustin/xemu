@@ -294,7 +294,22 @@ void xbox_init_common(MachineState *machine,
     PCIDevice *dev = pci_create_simple(pci_bus, PCI_DEVFN(9, 0), "piix3-ide");
     pci_ide_create_devs(dev);
     // idebus[0] = qdev_get_child_bus(&dev->qdev, "ide.0");
-    // idebus[1] = qdev_get_child_bus(&dev->qdev, "ide.1");
+    // idebus[1] = qdev_get_child_bus(&dev->qdev, "ide.1");	
+	
+	/* 
+     * 【精準狙擊】
+     * 遍歷 IDE 控制器上的所有設備，只要發現設備類型是光碟機 (IDE_CD)，
+     * 就注入 6ms 的 ATAPI DMA 延遲，完美避開硬碟，絕不當機！
+     */
+    PCIIDEState *pci_ide = PCI_IDE(dev);
+    for (int i = 0; i < 2; i++) {         // 檢查兩條排線 (Bus 0, 1)
+        for (int j = 0; j < 2; j++) {     // 檢查 Master / Slave
+            IDEState *s = &pci_ide->bus[i].ifs[j];
+            if (s->drive_kind == IDE_CD) {
+                s->ide_bus_set_irq_timer_delay_ns = 6000000ULL; // 命中！注入 6ms
+            }
+        }
+    }
 
     /* smbus devices */
     smbus_xbox_smc_init(smbus, 0x10);
