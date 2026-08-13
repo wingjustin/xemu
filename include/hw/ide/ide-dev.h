@@ -140,6 +140,10 @@ struct IDEState {
     uint8_t *smart_selftest_data;
     /* AHCI */
     int ncq_queues;
+	
+	/*timer for irq_raise*/
+    uint32_t ide_bus_set_irq_timer_delay_ns;
+    QEMUTimer *ide_bus_set_irq_timer; 
 };
 
 struct IDEDeviceClass {
